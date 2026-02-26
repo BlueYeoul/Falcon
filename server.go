@@ -381,23 +381,44 @@ func handleListProjects(w http.ResponseWriter, r *http.Request) {
 	deviceID := r.Header.Get("X-Falcon-Device-ID")
 	username := filepath.Base(r.URL.Query().Get("user"))
 	if username == "." || username == "" {
-		username = deviceID
-	}
-
-	userDir := filepath.Join(ServerProjectsDir, username)
-	entries, err := os.ReadDir(userDir)
-	if err != nil {
-		json.NewEncoder(w).Encode([]string{})
-		return
-	}
-
-	var projects []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".fco") {
-			projects = append(projects, strings.TrimSuffix(e.Name(), ".fco"))
+		// Lookup who owns this device
+		ownerFile := filepath.Join(ServerKeysDir, deviceID+".owner")
+		if data, err := os.ReadFile(ownerFile); err == nil {
+			username = string(data)
+		} else {
+			username = deviceID
 		}
 	}
-	fmt.Printf("[Server] Listing projects for user: %s (Found: %d)\n", r.URL.Query().Get("user"), len(projects))
+
+	// List projects from the new incremental refs directory
+	userDir := filepath.Join(ServerRefsDir, username)
+	entries, _ := os.ReadDir(userDir)
+
+	var projects []string
+	projectMap := make(map[string]bool)
+
+	for _, e := range entries {
+		if e.IsDir() {
+			projectMap[e.Name()] = true
+		}
+	}
+
+	// Also check legacy storage for backward compatibility
+	legacyDir := filepath.Join(ServerProjectsDir, username)
+	if lEntries, err := os.ReadDir(legacyDir); err == nil {
+		for _, e := range lEntries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".fco") {
+				name := strings.TrimSuffix(e.Name(), ".fco")
+				projectMap[name] = true
+			}
+		}
+	}
+
+	for p := range projectMap {
+		projects = append(projects, p)
+	}
+
+	fmt.Printf("[Server] Listing projects for user: %s (Found: %d)\n", username, len(projects))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(projects)
 }
