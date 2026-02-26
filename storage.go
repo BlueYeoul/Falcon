@@ -260,6 +260,11 @@ func loadIgnorePatterns() ([]string, error) {
 func shouldIgnore(path string, info os.FileInfo, patterns []string) bool {
 	pathSlash := filepath.ToSlash(filepath.Clean(path))
 
+	// 🛑 NEVER ignore the root directory itself
+	if pathSlash == "." || pathSlash == "./" {
+		return false
+	}
+
 	// Base internal ignores
 	if strings.HasPrefix(pathSlash, LocalRepoDir) || strings.Contains(pathSlash, ".git") {
 		return true

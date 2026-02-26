@@ -71,6 +71,9 @@ func handleAdd(patterns []string) {
 		if err != nil {
 			return err
 		}
+		if path == "." {
+			return nil
+		}
 		if shouldIgnore(path, info, ignorePatterns) {
 			if info.IsDir() {
 				return filepath.SkipDir
@@ -157,6 +160,9 @@ func handleStatus() {
 	// 1. Working Dir vs Index
 	filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			return nil
+		}
+		if path == "." {
 			return nil
 		}
 		if shouldIgnore(path, info, ignorePatterns) {
