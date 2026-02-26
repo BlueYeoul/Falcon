@@ -4,7 +4,7 @@
 
 REPO_URL="https://github.com/BlueYeoul/Falcon"
 INSTALL_PATH="/usr/local/bin"
-VERSION="0.3.2-alpha"
+VERSION="v0.0.1-alpha"
 
 set -e
 
