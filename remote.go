@@ -190,9 +190,8 @@ func handlePush() {
 
 		path := filepath.Join(GlobalBlobsDir, hash)
 		if _, err := os.Stat(path); err != nil {
-			fmt.Printf("\n[Error] Blob %s is missing from local cache.\n", hash)
-			fmt.Println("  (Hint: Run 'falcon add .' to re-index and regenerate missing blobs)")
-			return
+			fmt.Printf("\n  ⚠️  Skipping missing blob %s (not in local cache)\n", hash[:12])
+			continue
 		}
 
 		if err := pushBlob(url, hash); err != nil {
@@ -235,7 +234,8 @@ func pushBlob(baseURL, hash string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("status %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server rejected with status %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
 }
@@ -255,7 +255,8 @@ func pushManifest(baseURL, user, project string, m VersionManifest) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("status %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server rejected with status %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
 }

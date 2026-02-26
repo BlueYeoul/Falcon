@@ -198,6 +198,7 @@ func verifyRequestAuth(r *http.Request) bool {
 	timestamp := r.Header.Get("X-Falcon-Timestamp")
 
 	if deviceID == "" || signature == "" || timestamp == "" {
+		fmt.Printf("[Auth] Missing headers: ID:%s, Sig:%s, TS:%s\n", deviceID, signature, timestamp)
 		return false
 	}
 

@@ -397,6 +397,7 @@ func handleListProjects(w http.ResponseWriter, r *http.Request) {
 			projects = append(projects, strings.TrimSuffix(e.Name(), ".fco"))
 		}
 	}
+	fmt.Printf("[Server] Listing projects for user: %s (Found: %d)\n", r.URL.Query().Get("user"), len(projects))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(projects)
 }
@@ -419,7 +420,7 @@ func handlePushManifest(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(ServerRefsDir, username, projectName, id+".json")
 	os.MkdirAll(filepath.Dir(path), 0755)
 	atomicWriteJSON(path, m)
-	fmt.Printf("[Server] Manifest saved: %s for %s/%s\n", id, username, projectName)
+	fmt.Printf("[Server] ✅ Manifest saved: %s for %s/%s\n", id, username, projectName)
 }
 
 func handlePushBlob(w http.ResponseWriter, r *http.Request) {
@@ -439,7 +440,7 @@ func handlePushBlob(w http.ResponseWriter, r *http.Request) {
 	f, _ := os.Create(path)
 	defer f.Close()
 	io.Copy(f, r.Body)
-	fmt.Printf("[Server] Blob backed up: %s\n", hash)
+	fmt.Printf("[Server] ✅ Blob backed up: %s\n", hash)
 }
 
 func handlePullHead(w http.ResponseWriter, r *http.Request) {
