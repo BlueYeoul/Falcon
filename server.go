@@ -51,53 +51,54 @@ func startServer(port string) {
 	os.MkdirAll(ServerProjectsDir, 0755)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("[Server] %s %s from %s\n", r.Method, r.URL.Path, r.RemoteAddr)
+		p := filepath.Clean(r.URL.Path)
+		fmt.Printf("[Server] %s %s (p:%s) from %s\n", r.Method, r.URL.Path, p, r.RemoteAddr)
 
-		if strings.HasPrefix(r.URL.Path, "/auth/register") {
+		if strings.HasPrefix(p, "/auth/register") {
 			handleRegisterKey(w, r)
-		} else if r.URL.Path == "/auth/trust/gen" {
+		} else if p == "/auth/trust/gen" {
 			handleAuthTrustGen(w, r)
-		} else if r.URL.Path == "/auth/trust/use" {
+		} else if p == "/auth/trust/use" {
 			handleAuthTrustUse(w, r)
-		} else if r.URL.Path == "/auth/rename" {
+		} else if p == "/auth/rename" {
 			handleAuthRename(w, r)
-		} else if strings.HasPrefix(r.URL.Path, "/sync/") {
+		} else if strings.HasPrefix(p, "/sync/") {
 			if !verifyRequestAuth(r) {
 				http.Error(w, "Unauthorized", 401)
 				return
 			}
-			if strings.HasSuffix(r.URL.Path, "/set") {
+			if strings.HasSuffix(p, "/set") {
 				handleSetSync(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/unset") {
+			} else if strings.HasSuffix(p, "/unset") {
 				handleUnsetSync(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/status") {
+			} else if strings.HasSuffix(p, "/status") {
 				handleGetSyncStatus(w, r)
 			}
-		} else if r.URL.Path == "/list" {
+		} else if p == "/list" {
 			handleListProjects(w, r)
-		} else if strings.HasPrefix(r.URL.Path, "/push/") {
+		} else if strings.HasPrefix(p, "/push/") {
 			if !verifyRequestAuth(r) {
 				http.Error(w, "Unauthorized", 401)
 				return
 			}
-			if strings.HasSuffix(r.URL.Path, "/manifest") {
+			if strings.HasSuffix(p, "/manifest") {
 				handlePushManifest(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/blob") {
+			} else if strings.HasSuffix(p, "/blob") {
 				handlePushBlob(w, r)
 			}
-		} else if strings.HasPrefix(r.URL.Path, "/pull/") {
+		} else if strings.HasPrefix(p, "/pull/") {
 			if !verifyRequestAuth(r) {
 				http.Error(w, "Unauthorized", 401)
 				return
 			}
-			if strings.HasSuffix(r.URL.Path, "/head") {
+			if strings.HasSuffix(p, "/head") {
 				handlePullHead(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/manifest") {
+			} else if strings.HasSuffix(p, "/manifest") {
 				handlePullManifest(w, r)
-			} else if strings.HasSuffix(r.URL.Path, "/blob") {
+			} else if strings.HasSuffix(p, "/blob") {
 				handlePullBlob(w, r)
 			}
-		} else if strings.HasPrefix(r.URL.Path, "/push/branch") {
+		} else if strings.HasPrefix(p, "/push/branch") {
 			if !verifyRequestAuth(r) {
 				http.Error(w, "Unauthorized", 401)
 				return

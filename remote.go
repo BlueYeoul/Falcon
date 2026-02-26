@@ -332,6 +332,7 @@ func handlePull(target string) {
 			baseURL = "http://fco.blue-yeoul.com"
 		}
 	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
 
 	// If we are already in a repo, update it. If not, clone it.
 	if _, err := os.Stat(LocalRepoDir); err == nil {
