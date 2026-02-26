@@ -200,23 +200,19 @@ Commands:
 func handleUpdate() {
 	fmt.Println("🔄 Updating Falcon to the latest version...")
 
-	// 1. Pull latest code
-	fmt.Println("📦 Pulling latest changes from GitHub...")
-	pullCmd := exec.Command("git", "pull", "origin", "main")
-	pullCmd.Stdout = os.Stdout
-	pullCmd.Stderr = os.Stderr
-	if err := pullCmd.Run(); err != nil {
-		fmt.Printf("❌ Failed to pull changes: %v\n", err)
-		return
-	}
+	// Use the remote installer to update. This works regardless of whether
+	// the user is in a git worktree or has Go installed.
+	updateCmd := "curl -sL https://raw.githubusercontent.com/BlueYeoul/Falcon/main/install.sh | bash"
 
-	// 2. Run installer
-	fmt.Println("🛠️  Running installer...")
-	installCmd := exec.Command("/bin/bash", "./install.sh")
-	installCmd.Stdout = os.Stdout
-	installCmd.Stderr = os.Stderr
-	if err := installCmd.Run(); err != nil {
-		fmt.Printf("❌ Installation failed: %v\n", err)
+	fmt.Println("� Fetching and running the latest installer from GitHub...")
+	cmd := exec.Command("/bin/bash", "-c", updateCmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("❌ Update failed: %v\n", err)
+		fmt.Println("Please try running the installer manually:")
+		fmt.Println("  curl -sL https://raw.githubusercontent.com/BlueYeoul/Falcon/main/install.sh | bash")
 		return
 	}
 
