@@ -160,8 +160,8 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`🦅 Falcon - Deep Learning Optimized VCS (Graph-based, Verifiable Workflow)`)
-	fmt.Println(`
+	usage := `🦅 Falcon - Deep Learning Optimized VCS (Graph-based, Verifiable Workflow)
+
 Commands:
   falcon init [-n name]         Initialize a new repo
   falcon status                 Show working tree status
@@ -194,7 +194,8 @@ Commands:
   falcon vls (or tree)          Show visual version tree & branches
   falcon user <name>            Change your username/identity
   falcon update                 Update Falcon to the latest version via GitHub
-`)
+`
+	fmt.Print(usage)
 }
 func handleUpdate() {
 	fmt.Println("🔄 Updating Falcon to the latest version...")

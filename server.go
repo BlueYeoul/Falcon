@@ -18,6 +18,8 @@ type ServerState struct {
 	mu           sync.Mutex
 	Sessions     map[string]*SyncSession // branch -> session
 	PairingCodes map[string]PairingInfo  // code -> info
+	projectMu    sync.Mutex
+	ProjectLocks map[string]*sync.Mutex
 }
 
 type PairingInfo struct {
@@ -28,6 +30,18 @@ type PairingInfo struct {
 var state = &ServerState{
 	Sessions:     make(map[string]*SyncSession),
 	PairingCodes: make(map[string]PairingInfo),
+	ProjectLocks: make(map[string]*sync.Mutex),
+}
+
+func (s *ServerState) getLock(key string) *sync.Mutex {
+	s.projectMu.Lock()
+	defer s.projectMu.Unlock()
+	if l, ok := s.ProjectLocks[key]; ok {
+		return l
+	}
+	l := &sync.Mutex{}
+	s.ProjectLocks[key] = l
+	return l
 }
 
 func startServer(port string) {
@@ -48,6 +62,10 @@ func startServer(port string) {
 		} else if r.URL.Path == "/auth/rename" {
 			handleAuthRename(w, r)
 		} else if strings.HasPrefix(r.URL.Path, "/sync/") {
+			if !verifyRequestAuth(r) {
+				http.Error(w, "Unauthorized", 401)
+				return
+			}
 			if strings.HasSuffix(r.URL.Path, "/set") {
 				handleSetSync(w, r)
 			} else if strings.HasSuffix(r.URL.Path, "/unset") {
@@ -58,12 +76,20 @@ func startServer(port string) {
 		} else if r.URL.Path == "/list" {
 			handleListProjects(w, r)
 		} else if strings.HasPrefix(r.URL.Path, "/push/") {
+			if !verifyRequestAuth(r) {
+				http.Error(w, "Unauthorized", 401)
+				return
+			}
 			if strings.HasSuffix(r.URL.Path, "/manifest") {
 				handlePushManifest(w, r)
 			} else if strings.HasSuffix(r.URL.Path, "/blob") {
 				handlePushBlob(w, r)
 			}
 		} else if strings.HasPrefix(r.URL.Path, "/pull/") {
+			if !verifyRequestAuth(r) {
+				http.Error(w, "Unauthorized", 401)
+				return
+			}
 			if strings.HasSuffix(r.URL.Path, "/manifest") {
 				handlePullManifest(w, r)
 			} else if strings.HasSuffix(r.URL.Path, "/blob") {
@@ -118,9 +144,13 @@ func handleServerReset() {
 // Certificate-based Auth Placeholder
 // In a real implementation, this would verify a signature.
 func handleRegisterKey(w http.ResponseWriter, r *http.Request) {
-	deviceID := r.URL.Query().Get("id")
-	username := r.URL.Query().Get("user")
-	if username == "" {
+	deviceID := filepath.Base(r.URL.Query().Get("id"))
+	username := filepath.Base(r.URL.Query().Get("user"))
+	if deviceID == "." || deviceID == "/" {
+		http.Error(w, "invalid device id", 400)
+		return
+	}
+	if username == "." || username == "" {
 		username = deviceID
 	}
 
@@ -174,7 +204,11 @@ func handleAuthTrustGen(w http.ResponseWriter, r *http.Request) {
 
 func handleAuthTrustUse(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
-	newDeviceID := r.URL.Query().Get("id")
+	newDeviceID := filepath.Base(r.URL.Query().Get("id"))
+	if newDeviceID == "." || newDeviceID == "/" {
+		http.Error(w, "invalid id", 400)
+		return
+	}
 
 	state.mu.Lock()
 	defer state.mu.Unlock()
@@ -187,19 +221,17 @@ func handleAuthTrustUse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Link new device to the same "User" (folder)
-	// For now, we'll store the new device's key and an alias mapping
 	keyPath := filepath.Join(ServerKeysDir, newDeviceID+".pub")
-	f, _ := os.Create(keyPath)
+	f, err := os.Create(keyPath)
+	if err != nil {
+		http.Error(w, "Failed to create key", 500)
+		return
+	}
 	defer f.Close()
 	io.Copy(f, r.Body)
 
 	// Store same owner for the new device
 	os.WriteFile(filepath.Join(ServerKeysDir, newDeviceID+".owner"), []byte(info.Username), 0644)
-
-	// In a real system, we'd have a DB mapping multiple DeviceIDs to one UserID.
-	// Here, we'll just create a symlink or a reference file so verifyRequestAuth
-	// can find the folder.
-	// Since we use deviceID as user folder, we'll just tell the user their 'RemoteUser' is the old one.
 
 	delete(state.PairingCodes, code)
 	fmt.Printf("[Server] Device %s paired with User %s\n", newDeviceID, info.Username)
@@ -213,9 +245,9 @@ func handleAuthRename(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deviceID := r.Header.Get("X-Falcon-Device-ID")
-	newName := r.URL.Query().Get("newname")
-	if newName == "" {
-		http.Error(w, "newname required", 400)
+	newName := filepath.Base(r.URL.Query().Get("newname"))
+	if newName == "" || newName == "." || newName == "/" {
+		http.Error(w, "invalid newname", 400)
 		return
 	}
 
@@ -224,11 +256,19 @@ func handleAuthRename(w http.ResponseWriter, r *http.Request) {
 	oldNameBytes, _ := os.ReadFile(ownerFile)
 	oldName := string(oldNameBytes)
 
+	if oldName == "" {
+		http.Error(w, "user not found", 404)
+		return
+	}
+
+	state.getLock("auth:rename").Lock()
+	defer state.getLock("auth:rename").Unlock()
+
 	// 2. Update owner mapping for THIS device
 	os.WriteFile(ownerFile, []byte(newName), 0644)
 
 	// 3. (Optional) Rename project directory on server
-	if oldName != "" && oldName != newName {
+	if oldName != newName {
 		oldPath := filepath.Join(ServerProjectsDir, oldName)
 		newPath := filepath.Join(ServerProjectsDir, newName)
 		if _, err := os.Stat(oldPath); err == nil {
@@ -337,8 +377,8 @@ func handleListProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deviceID := r.Header.Get("X-Falcon-Device-ID")
-	username := r.URL.Query().Get("user")
-	if username == "" {
+	username := filepath.Base(r.URL.Query().Get("user"))
+	if username == "." || username == "" {
 		username = deviceID
 	}
 
@@ -360,9 +400,20 @@ func handleListProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePushManifest(w http.ResponseWriter, r *http.Request) {
-	projectName := r.URL.Query().Get("project")
+	projectName := filepath.Base(r.URL.Query().Get("project"))
+	if projectName == "" || projectName == "." || projectName == "/" {
+		http.Error(w, "invalid project", 400)
+		return
+	}
+
+	state.getLock("proj:" + projectName).Lock()
+	defer state.getLock("proj:" + projectName).Unlock()
+
 	var m VersionManifest
-	json.NewDecoder(r.Body).Decode(&m)
+	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		http.Error(w, "invalid manifest", 400)
+		return
+	}
 
 	id := m.CommitID
 	path := filepath.Join(ServerRefsDir, projectName, id+".json")
@@ -372,7 +423,15 @@ func handlePushManifest(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePushBlob(w http.ResponseWriter, r *http.Request) {
-	hash := r.URL.Query().Get("hash")
+	hash := filepath.Base(r.URL.Query().Get("hash"))
+	if hash == "" || hash == "." || hash == "/" {
+		http.Error(w, "invalid hash", 400)
+		return
+	}
+
+	state.getLock("blob:" + hash).Lock()
+	defer state.getLock("blob:" + hash).Unlock()
+
 	path := filepath.Join(ServerBlobsDir, hash)
 	if _, err := os.Stat(path); err == nil {
 		return // Already exists (content-addressable backup!)
@@ -384,14 +443,30 @@ func handlePushBlob(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePullManifest(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	id := r.URL.Query().Get("id")
+	project := filepath.Base(r.URL.Query().Get("project"))
+	id := filepath.Base(r.URL.Query().Get("id"))
+	if project == "." || id == "." {
+		http.Error(w, "invalid params", 400)
+		return
+	}
+
+	state.getLock("proj:" + project).Lock()
+	defer state.getLock("proj:" + project).Unlock()
+
 	path := filepath.Join(ServerRefsDir, project, id+".json")
 	http.ServeFile(w, r, path)
 }
 
 func handlePullBlob(w http.ResponseWriter, r *http.Request) {
-	hash := r.URL.Query().Get("hash")
+	hash := filepath.Base(r.URL.Query().Get("hash"))
+	if hash == "." || hash == "" {
+		http.Error(w, "invalid hash", 400)
+		return
+	}
+
+	state.getLock("blob:" + hash).Lock()
+	defer state.getLock("blob:" + hash).Unlock()
+
 	path := filepath.Join(ServerBlobsDir, hash)
 	http.ServeFile(w, r, path)
 }
@@ -409,7 +484,11 @@ func handleFCOStorage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	username, projectFile := parts[0], parts[1]
+	username, projectFile := filepath.Base(parts[0]), filepath.Base(parts[1])
+	if username == "." || projectFile == "." {
+		http.Error(w, "invalid path", 400)
+		return
+	}
 
 	// 🔒 Security Check
 	if !verifyRequestAuth(r) {
@@ -422,8 +501,15 @@ func handleFCOStorage(w http.ResponseWriter, r *http.Request) {
 	storagePath := filepath.Join(storageDir, projectFile)
 
 	if r.Method == "PUT" {
+		state.getLock("fco:" + username + "/" + projectFile).Lock()
+		defer state.getLock("fco:" + username + "/" + projectFile).Unlock()
+
 		fmt.Printf("[Server] Storing uploaded .fco: %s for %s\n", projectFile, username)
-		f, _ := os.Create(storagePath)
+		f, err := os.Create(storagePath)
+		if err != nil {
+			http.Error(w, "Failed to create file", 500)
+			return
+		}
 		defer f.Close()
 		io.Copy(f, r.Body)
 		fmt.Fprintf(w, "[Success] .fco saved on server.\n")

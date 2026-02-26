@@ -19,12 +19,15 @@ func acquireLock() func() {
 	if _, err := os.Stat(LocalRepoDir); os.IsNotExist(err) {
 		return func() {} // Not a repo yet
 	}
-	if _, err := os.Stat(LocalLockFile); err == nil {
+	// Use O_EXCL to ensure atomic create
+	f, err := os.OpenFile(LocalLockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
 		fmt.Println("[Error] Repository is locked by another process.")
 		fmt.Println("If you are sure no other falcon process is running, use 'falcon unlock'.")
 		os.Exit(1)
 	}
-	os.WriteFile(LocalLockFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	f.WriteString(fmt.Sprintf("%d", os.Getpid()))
+	f.Close()
 	return func() {
 		os.Remove(LocalLockFile)
 	}
@@ -60,6 +63,7 @@ func handleInit(name string) {
 }
 
 func handleAdd(patterns []string) {
+	defer acquireLock()()
 	ignorePatterns, _ := loadIgnorePatterns()
 	count := 0
 
@@ -273,6 +277,7 @@ func handleBranchList() {
 }
 
 func handleBranchCreate(name string) {
+	defer acquireLock()()
 	if getBranch(name) != "" {
 		fmt.Printf("Branch '%s' already exists.\n", name)
 		return

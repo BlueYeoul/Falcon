@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -216,8 +217,22 @@ func verifyRequestAuth(r *http.Request) bool {
 	valid := VerifySignature(pubKeyBytes, message, signature)
 	if !valid {
 		fmt.Printf("[Auth] Signature verification failed for device %s\n", deviceID)
+		return false
 	}
-	return valid
+
+	// 🕒 Prevent Replay Attacks: Check if timestamp is within 15 minutes
+	tsInt, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		fmt.Printf("[Auth] Invalid timestamp: %s\n", timestamp)
+		return false
+	}
+	diff := time.Now().Unix() - tsInt
+	if diff < -300 || diff > 900 { // Allow 5 min clock skew, 15 min expiration
+		fmt.Printf("[Auth] Signature expired (diff: %ds)\n", diff)
+		return false
+	}
+
+	return true
 }
 
 func handleRegis(username, token string) {
