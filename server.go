@@ -461,9 +461,12 @@ func handlePushBranch(w http.ResponseWriter, r *http.Request) {
 	username := filepath.Base(r.URL.Query().Get("user"))
 	project := filepath.Base(r.URL.Query().Get("project"))
 	branch := filepath.Base(r.URL.Query().Get("branch"))
+	if branch == "." || branch == "" {
+		branch = "main"
+	}
 	commit := filepath.Base(r.URL.Query().Get("commit"))
 
-	if username == "." || project == "." || branch == "." || commit == "." {
+	if username == "." || project == "." || commit == "." || commit == "" {
 		http.Error(w, "invalid params", 400)
 		return
 	}

@@ -212,13 +212,18 @@ func handlePush() {
 	fmt.Println("\n  ✅ All manifests synchronized.")
 
 	// 4. Push Branch Head
-	currentHead := getBranch(config.CurrentBranch)
+	branch := config.CurrentBranch
+	if branch == "" {
+		branch = "main"
+	}
+
+	currentHead := getBranch(branch)
 	if currentHead == "" {
 		currentHead = getHead() // Fallback if not on a branch
 	}
 	if currentHead != "" {
-		fmt.Printf("  ⬆️  Updating remote branch '%s' -> %s\n", config.CurrentBranch, currentHead[:12])
-		if err := pushBranch(url, config.RemoteUser, config.Name, config.CurrentBranch, currentHead); err != nil {
+		fmt.Printf("  ⬆️  Updating remote branch '%s' -> %s\n", branch, currentHead[:12])
+		if err := pushBranch(url, config.RemoteUser, config.Name, branch, currentHead); err != nil {
 			fmt.Printf("  ⚠️  Notice: Remote branch pointer update skipped or failed. (%v)\n", err)
 		}
 	}
@@ -313,12 +318,15 @@ func handlePull(target string) {
 	var baseURL, user, project string
 
 	if strings.HasPrefix(target, "http") {
-		// Detect user/project from URL if possible, or target URL is baseURL
-		baseURL = target
-		// Simple parsing: http://domain/user/project
-		parts := strings.Split(strings.TrimPrefix(strings.TrimPrefix(target, "http://"), "https://"), "/")
-		if len(parts) >= 2 {
-			user, project = parts[len(parts)-2], parts[len(parts)-1]
+		// Detect user/project from URL if possible
+		// Example: http://domain:port/user/project
+		parts := strings.Split(strings.TrimSuffix(target, "/"), "/")
+		if len(parts) >= 5 {
+			project = parts[len(parts)-1]
+			user = parts[len(parts)-2]
+			baseURL = strings.Join(parts[:3], "/")
+		} else {
+			baseURL = strings.TrimSuffix(target, "/")
 		}
 	} else {
 		parts := strings.Split(target, "/")

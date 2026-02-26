@@ -134,6 +134,9 @@ func loadConfig() RepoConfig {
 	if config.Author == "" {
 		config.Author = config.RemoteUser
 	}
+	if config.CurrentBranch == "" {
+		config.CurrentBranch = "main"
+	}
 
 	return config
 }

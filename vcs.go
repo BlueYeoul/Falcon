@@ -310,6 +310,11 @@ func handleCheckout(target string) {
 	restoreFiles(manifest, true)
 
 	setHead(target)
+	if getBranch(target) != "" {
+		config := loadConfig()
+		config.CurrentBranch = target
+		saveConfig(config)
+	}
 	fmt.Printf("Switched to %s\n", target)
 }
 
