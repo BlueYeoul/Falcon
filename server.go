@@ -384,14 +384,19 @@ func handleListProjects(w http.ResponseWriter, r *http.Request) {
 		// Lookup who owns this device
 		ownerFile := filepath.Join(ServerKeysDir, deviceID+".owner")
 		if data, err := os.ReadFile(ownerFile); err == nil {
-			username = string(data)
+			username = strings.TrimSpace(string(data))
+			fmt.Printf("[Server] Resolved username FROM OWNER FILE: %s -> %s\n", deviceID, username)
 		} else {
 			username = deviceID
+			fmt.Printf("[Server] No owner file found, fallback to deviceID: %s\n", username)
 		}
+	} else {
+		fmt.Printf("[Server] Using username FROM QUERY: %s\n", username)
 	}
 
 	// List projects from the new incremental refs directory
 	userDir := filepath.Join(ServerRefsDir, username)
+	fmt.Printf("[Server] Searching refs in: %s\n", userDir)
 	entries, _ := os.ReadDir(userDir)
 
 	var projects []string
@@ -424,9 +429,10 @@ func handleListProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePushManifest(w http.ResponseWriter, r *http.Request) {
-	username := filepath.Base(r.URL.Query().Get("user"))
+	username := strings.TrimSpace(filepath.Base(r.URL.Query().Get("user")))
 	projectName := filepath.Base(r.URL.Query().Get("project"))
 	if username == "." || projectName == "." {
+		fmt.Printf("[Server] PushManifest REJECTED: user=%s, project=%s\n", username, projectName)
 		http.Error(w, "invalid params", 400)
 		return
 	}
