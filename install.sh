@@ -24,11 +24,13 @@ install_binary() {
     mkdir -p "$INSTALL_PATH" 2>/dev/null || sudo mkdir -p "$INSTALL_PATH"
     
     if [ -w "$INSTALL_PATH" ]; then
+        rm -f "$dest" # Remove old binary first (essential on macOS to avoid Killed: 9)
         cp "$src" "$dest"
         ln -sf "$dest" "$INSTALL_PATH/fco" 2>/dev/null || sudo ln -sf "$dest" "$INSTALL_PATH/fco"
         chmod +x "$dest"
     else
         echo "🔐 Password required for system installation:"
+        sudo rm -f "$dest"
         sudo cp "$src" "$dest"
         sudo ln -sf "$dest" "$INSTALL_PATH/fco"
         sudo chmod +x "$dest"
