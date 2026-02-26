@@ -260,25 +260,35 @@ func loadIgnorePatterns() ([]string, error) {
 func shouldIgnore(path string, info os.FileInfo, patterns []string) bool {
 	pathSlash := filepath.ToSlash(filepath.Clean(path))
 
+	// Base internal ignores
 	if strings.HasPrefix(pathSlash, LocalRepoDir) || strings.Contains(pathSlash, ".git") {
 		return true
 	}
-	if info.Name() == "main.go" || info.Name() == "main.exe" || info.Name() == "main" || info.Name() == "falcon.exe" || info.Name() == "falcon" {
+	if info != nil && (info.Name() == "main.go" || info.Name() == "main.exe" || info.Name() == "main" || info.Name() == "falcon.exe" || info.Name() == "falcon") {
 		return true // Self executable protection
 	}
 
 	for _, pattern := range patterns {
-		cleanPattern := strings.TrimSuffix(pattern, "/")
-
-		// Simple recursive pattern heuristic (Treat `**` as standard prefix for now in custom logic)
-		if strings.Contains(cleanPattern, "**") {
-			cleanPattern = strings.ReplaceAll(cleanPattern, "**", "*")
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" || strings.HasPrefix(pattern, "#") {
+			continue
 		}
 
+		cleanPattern := strings.TrimSuffix(pattern, "/")
+		isDirPattern := strings.HasSuffix(pattern, "/")
+
+		// Match direct name or as a path prefix (for directory ignoring)
+		if isDirPattern || info.IsDir() {
+			// If it's a directory pattern like ".venv/", match path prefixes
+			if strings.HasPrefix(pathSlash+"/", cleanPattern+"/") {
+				return true
+			}
+		}
+
+		// Standard glob matching
 		if strings.Contains(cleanPattern, "/") {
 			cleanPattern = strings.TrimPrefix(cleanPattern, "/")
 			matched, err := filepath.Match(cleanPattern, pathSlash)
-			// Secondary prefix matching logic for paths (e.g. node_modules/ ignoring everything inside)
 			if (err == nil && matched) || strings.HasPrefix(pathSlash+"/", cleanPattern+"/") {
 				return true
 			}

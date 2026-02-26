@@ -156,10 +156,16 @@ func handleStatus() {
 
 	// 1. Working Dir vs Index
 	filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
 			return nil
 		}
 		if shouldIgnore(path, info, ignorePatterns) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
 			return nil
 		}
 
