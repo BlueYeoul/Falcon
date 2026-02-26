@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const Version = "v0.0.1+7"
+const Version = "v0.0.1+8"
 
 func main() {
 	initGlobalStorage()

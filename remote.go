@@ -203,14 +203,46 @@ func handlePush() {
 
 	// 3. Push Manifests
 	for _, m := range manifests {
-		fmt.Printf("  ⬆️  Pushing Manifest: %s (%s)\n", m.CommitID, m.Description)
+		fmt.Printf("\r  ⬆️  Pushing Manifest: %s (%s)", m.CommitID[:12], m.Description)
 		if err := pushManifest(url, config.RemoteUser, config.Name, m); err != nil {
-			fmt.Printf("[Error] Failed to push manifest %s: %v\n", m.CommitID, err)
+			fmt.Printf("\n[Error] Failed to push manifest %s: %v\n", m.CommitID, err)
 			return
+		}
+	}
+	fmt.Println("\n  ✅ All manifests synchronized.")
+
+	// 4. Push Branch Head
+	currentHead := getBranch(config.CurrentBranch)
+	if currentHead == "" {
+		currentHead = getHead() // Fallback if not on a branch
+	}
+	if currentHead != "" {
+		fmt.Printf("  ⬆️  Updating remote branch '%s' -> %s\n", config.CurrentBranch, currentHead[:12])
+		if err := pushBranch(url, config.RemoteUser, config.Name, config.CurrentBranch, currentHead); err != nil {
+			fmt.Printf("  ⚠️  Failed to update remote branch: %v\n", err)
 		}
 	}
 
 	fmt.Println("[Success] Repository pushed successfully!")
+}
+
+func pushBranch(baseURL, user, project, branch, commit string) error {
+	url := fmt.Sprintf("%s/push/branch?user=%s&project=%s&branch=%s&commit=%s", baseURL, user, project, branch, commit)
+	req, _ := http.NewRequest("POST", url, nil)
+	addAuthHeaders(req)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("server rejected with status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
 }
 
 func pushBlob(baseURL, hash string) error {
@@ -301,7 +333,6 @@ func handlePull(target string) {
 		}
 	}
 
-	baseURL = strings.TrimSuffix(baseURL, "/")
 	// If we are already in a repo, update it. If not, clone it.
 	if _, err := os.Stat(LocalRepoDir); err == nil {
 		fmt.Printf("[Falcon] Pulling updates for %s/%s...\n", user, project)
@@ -311,7 +342,12 @@ func handlePull(target string) {
 			fmt.Println("[Success] Repository updated successfully.")
 		}
 	} else {
-		handleCloneRemoteGranular(baseURL, user, project)
+		// If project wasn't parsed from URL, use the target as the folder name
+		folderName := project
+		if folderName == "" {
+			folderName = filepath.Base(target)
+		}
+		handleCloneRemoteGranular(baseURL, user, folderName)
 	}
 }
 
@@ -338,8 +374,14 @@ func handleCloneRemoteGranular(baseURL, user, project string) {
 }
 
 func syncRepoGranular(baseURL, user, project string) error {
+	config := loadConfig()
+	branch := config.CurrentBranch
+	if branch == "" {
+		branch = "main" // Default
+	}
+
 	// 1. Get HEAD
-	url := fmt.Sprintf("%s/pull/head?user=%s&project=%s", baseURL, user, project)
+	url := fmt.Sprintf("%s/pull/head?user=%s&project=%s&branch=%s", baseURL, user, project, branch)
 	req, _ := http.NewRequest("GET", url, nil)
 	addAuthHeaders(req)
 

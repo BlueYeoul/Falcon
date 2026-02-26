@@ -97,6 +97,12 @@ func startServer(port string) {
 			} else if strings.HasSuffix(r.URL.Path, "/blob") {
 				handlePullBlob(w, r)
 			}
+		} else if strings.HasPrefix(r.URL.Path, "/push/branch") {
+			if !verifyRequestAuth(r) {
+				http.Error(w, "Unauthorized", 401)
+				return
+			}
+			handlePushBranch(w, r)
 		} else {
 			handleFCOStorage(w, r)
 		}
@@ -450,6 +456,29 @@ func handlePushManifest(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("[Server] ✅ Manifest saved: %s for %s/%s\n", id, username, projectName)
 }
 
+func handlePushBranch(w http.ResponseWriter, r *http.Request) {
+	username := filepath.Base(r.URL.Query().Get("user"))
+	project := filepath.Base(r.URL.Query().Get("project"))
+	branch := filepath.Base(r.URL.Query().Get("branch"))
+	commit := filepath.Base(r.URL.Query().Get("commit"))
+
+	if username == "." || project == "." || branch == "." || commit == "." {
+		http.Error(w, "invalid params", 400)
+		return
+	}
+
+	branchDir := filepath.Join(ServerRefsDir, username, project, "branches")
+	os.MkdirAll(branchDir, 0755)
+	err := os.WriteFile(filepath.Join(branchDir, branch), []byte(commit), 0644)
+	if err != nil {
+		http.Error(w, "failed to save branch", 500)
+		return
+	}
+
+	fmt.Printf("[Server] ✅ Branch updated: %s/%s -> %s\n", project, branch, commit)
+	fmt.Fprintf(w, "OK")
+}
+
 func handlePushBlob(w http.ResponseWriter, r *http.Request) {
 	hash := filepath.Base(r.URL.Query().Get("hash"))
 	if hash == "" || hash == "." || hash == "/" {
@@ -473,15 +502,29 @@ func handlePushBlob(w http.ResponseWriter, r *http.Request) {
 func handlePullHead(w http.ResponseWriter, r *http.Request) {
 	username := filepath.Base(r.URL.Query().Get("user"))
 	project := filepath.Base(r.URL.Query().Get("project"))
+	branch := filepath.Base(r.URL.Query().Get("branch"))
+	if branch == "." {
+		branch = "main"
+	}
+
 	refDir := filepath.Join(ServerRefsDir, username, project)
 
+	// 1. Try to get head from explicit branch file
+	branchFile := filepath.Join(refDir, "branches", branch)
+	if data, err := os.ReadFile(branchFile); err == nil {
+		commitID := strings.TrimSpace(string(data))
+		fmt.Printf("[Server] Serving HEAD for %s/%s branch %s: %s\n", username, project, branch, commitID)
+		json.NewEncoder(w).Encode(map[string]string{"commit_id": commitID})
+		return
+	}
+
+	// 2. Fallback to modtime heuristic
 	entries, err := os.ReadDir(refDir)
 	if err != nil || len(entries) == 0 {
 		http.Error(w, "no commits found", 404)
 		return
 	}
 
-	// Simple heuristic: return latest by modtime
 	var latest os.FileInfo
 	var latestName string
 	for _, e := range entries {
@@ -495,7 +538,13 @@ func handlePullHead(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if latestName == "" {
+		http.Error(w, "no manifests found", 404)
+		return
+	}
+
 	commitID := strings.TrimSuffix(latestName, ".json")
+	fmt.Printf("[Server] Serving Fallback HEAD for %s/%s: %s\n", username, project, commitID)
 	json.NewEncoder(w).Encode(map[string]string{"commit_id": commitID})
 }
 
