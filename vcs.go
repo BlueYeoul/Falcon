@@ -101,6 +101,36 @@ func handleAdd(patterns []string) {
 	}
 }
 
+func handleReset(patterns []string) {
+	defer acquireLock()()
+	index := loadIndex()
+	count := 0
+
+	stagedPaths := []string{}
+	for path, entry := range index {
+		if entry.Staged {
+			matched := false
+			for _, p := range patterns {
+				if p == "." || strings.HasPrefix(path, p) || path == p {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				stagedPaths = append(stagedPaths, path)
+				count++
+			}
+		}
+	}
+
+	if count > 0 {
+		clearStaging(stagedPaths)
+		fmt.Printf("[Falcon] Unstaged %d files.\n", count)
+	} else {
+		fmt.Println("No staged files matched the pattern.")
+	}
+}
+
 func handleStatus() {
 	index := loadIndex()
 	ignorePatterns, _ := loadIgnorePatterns()

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const Version = "v0.0.1+11d"
+const Version = "v0.0.1+12"
 
 func main() {
 	initGlobalStorage()
@@ -42,6 +42,12 @@ func main() {
 			return
 		}
 		handleAdd(os.Args[2:])
+	case "reset":
+		if len(os.Args) < 3 {
+			handleReset([]string{"."}) // Default to all if no path
+		} else {
+			handleReset(os.Args[2:])
+		}
 	case "status":
 		handleStatus()
 	case "commit":
@@ -174,6 +180,7 @@ Commands:
   falcon init [-n name]         Initialize a new repo
   falcon status                 Show working tree status
   falcon add <path>             Stage files for commit
+  falcon reset <path>           Unstage files (undo add)
   falcon commit [-m msg]        Create a new commit from staged files
   falcon log                    Show commit logs in DAG order
   falcon diff <v1> <v2>         Show line-by-line changes
