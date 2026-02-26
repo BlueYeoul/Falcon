@@ -76,6 +76,12 @@ func startServer(port string) {
 			}
 		} else if p == "/list" {
 			handleListProjects(w, r)
+		} else if strings.HasPrefix(p, "/push/branch") {
+			if !verifyRequestAuth(r) {
+				http.Error(w, "Unauthorized", 401)
+				return
+			}
+			handlePushBranch(w, r)
 		} else if strings.HasPrefix(p, "/push/") {
 			if !verifyRequestAuth(r) {
 				http.Error(w, "Unauthorized", 401)
@@ -98,12 +104,6 @@ func startServer(port string) {
 			} else if strings.HasSuffix(p, "/blob") {
 				handlePullBlob(w, r)
 			}
-		} else if strings.HasPrefix(p, "/push/branch") {
-			if !verifyRequestAuth(r) {
-				http.Error(w, "Unauthorized", 401)
-				return
-			}
-			handlePushBranch(w, r)
 		} else {
 			handleFCOStorage(w, r)
 		}
