@@ -305,7 +305,11 @@ func handlePull(target string) {
 	// If we are already in a repo, update it. If not, clone it.
 	if _, err := os.Stat(LocalRepoDir); err == nil {
 		fmt.Printf("[Falcon] Pulling updates for %s/%s...\n", user, project)
-		syncRepoGranular(baseURL, user, project)
+		if err := syncRepoGranular(baseURL, user, project); err != nil {
+			fmt.Printf("❌ [Pull Failed] %v\n", err)
+		} else {
+			fmt.Println("[Success] Repository updated successfully.")
+		}
 	} else {
 		handleCloneRemoteGranular(baseURL, user, project)
 	}
@@ -325,11 +329,15 @@ func handleCloneRemoteGranular(baseURL, user, project string) {
 	config.Name = project
 	saveConfig(config)
 
-	syncRepoGranular(baseURL, user, project)
+	if err := syncRepoGranular(baseURL, user, project); err != nil {
+		fmt.Printf("❌ [Clone Failed] %v\n", err)
+		// Cleanup partial clone?
+		return
+	}
 	fmt.Println("[Success] Repository cloned successfully.")
 }
 
-func syncRepoGranular(baseURL, user, project string) {
+func syncRepoGranular(baseURL, user, project string) error {
 	// 1. Get HEAD
 	url := fmt.Sprintf("%s/pull/head?user=%s&project=%s", baseURL, user, project)
 	req, _ := http.NewRequest("GET", url, nil)
@@ -337,9 +345,11 @@ func syncRepoGranular(baseURL, user, project string) {
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		fmt.Printf("[Error] Failed to fetch remote head. Status: %d\n", resp.StatusCode)
-		return
+	if err != nil {
+		return fmt.Errorf("network error: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("failed to fetch remote head. Status: %d", resp.StatusCode)
 	}
 	var res map[string]string
 	json.NewDecoder(resp.Body).Decode(&res)
@@ -364,18 +374,29 @@ func syncRepoGranular(baseURL, user, project string) {
 		fmt.Printf("\r  📥 Fetching Manifests: %d...", fetchedCount+1)
 		m, err := fetchManifest(baseURL, user, project, id)
 		if err != nil {
-			fmt.Printf("\n[Error] Failed to fetch manifest %s: %v\n", id, err)
-			return
+			fmt.Printf("\n  ⚠️  Failed to fetch manifest %s: %v. Continuing...\n", id, err)
+			continue
 		}
 		fetchedCount++
 
 		// Add parents to queue
-		fetchQueue = append(fetchQueue, m.Parents...)
+		for _, pid := range m.Parents {
+			// Only follow parents that look like valid hashes (commit IDs in Falcon are 16-char hex)
+			if len(pid) == 16 {
+				fetchQueue = append(fetchQueue, pid)
+			} else {
+				fmt.Printf("\n  ⚠️  Skipping invalid parent format: %s\n", pid)
+			}
+		}
 	}
 	fmt.Println("\n  ✅ All manifests synchronized.")
 
 	// 3. Sync Blobs for the HEAD version
-	headManifest, _ := loadManifest(headID)
+	headManifest, err := loadManifest(headID)
+	if err != nil {
+		return fmt.Errorf("failed to load head manifest: %v", err)
+	}
+
 	totalBlobs := len(headManifest.Files)
 	for i, f := range headManifest.Files {
 		fmt.Printf("\r  📥 Fetching Blobs: %d/%d (%s...)", i+1, totalBlobs, f.Hash[:8])
@@ -391,6 +412,7 @@ func syncRepoGranular(baseURL, user, project string) {
 
 	// 4. Auto-checkout
 	handleCheckout(headID)
+	return nil
 }
 
 func fetchManifest(baseURL, user, project, id string) (*VersionManifest, error) {

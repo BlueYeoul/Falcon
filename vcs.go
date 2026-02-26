@@ -193,7 +193,10 @@ func handleCommit(isMajor, isMinor bool, description string) {
 
 	headCommitID := getBranch(headTarget)
 	if headCommitID == "" {
-		headCommitID = headTarget
+		// If it's not a branch, check if it's a valid commit ID by seeing if the file exists
+		if _, err := os.Stat(filepath.Join(LocalRefsDir, headTarget+".json")); err == nil {
+			headCommitID = headTarget
+		}
 	}
 
 	currentFiles := make(map[string]FileMeta)
