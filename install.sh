@@ -38,9 +38,16 @@ install_binary() {
 }
 
 if command -v go >/dev/null 2>&1; then
-    echo "🛠️  Go detected. Building Falcon from source..."
+    echo "🛠️  Go detected. Building Falcon from source to ensure latest version..."
+    TEMP_BUILD_DIR=$(mktemp -d)
+    git clone --depth 1 "$REPO_URL" "$TEMP_BUILD_DIR" >/dev/null 2>&1
+    
+    pushd "$TEMP_BUILD_DIR" >/dev/null
     go build -o falcon_bin *.go
-    install_binary "falcon_bin"
+    popd >/dev/null
+    
+    install_binary "$TEMP_BUILD_DIR/falcon_bin"
+    rm -rf "$TEMP_BUILD_DIR"
 else
     # Detect OS and Architecture
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
