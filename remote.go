@@ -149,7 +149,12 @@ func handlePush() {
 	}
 	url = strings.TrimSuffix(url, "/")
 
+	pub, _, _ := EnsureKeys()
+	deviceID, _ := os.Hostname()
 	fmt.Printf("[Falcon] Pushing incremental updates to %s...\n", url)
+	if len(pub) > 0 {
+		fmt.Printf("  Using Device ID: %s %x...\n", deviceID, pub[:4])
+	}
 
 	// 1. Collect all manifests and blobs
 	refs, err := os.ReadDir(LocalRefsDir)
@@ -182,6 +187,14 @@ func handlePush() {
 	for hash := range blobHashes {
 		currentBlob++
 		fmt.Printf("\r  ⬆️  Pushing Blobs: %d/%d (%s...)", currentBlob, totalBlobs, hash[:8])
+
+		path := filepath.Join(GlobalBlobsDir, hash)
+		if _, err := os.Stat(path); err != nil {
+			fmt.Printf("\n[Error] Blob %s is missing from local cache.\n", hash)
+			fmt.Println("  (Hint: Run 'falcon add .' to re-index and regenerate missing blobs)")
+			return
+		}
+
 		if err := pushBlob(url, hash); err != nil {
 			fmt.Printf("\n[Error] Failed to push blob %s: %v\n", hash, err)
 			return
