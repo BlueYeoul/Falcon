@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const Version = "v0.0.1+11b"
+const Version = "v0.0.1+11c"
 
 func main() {
 	initGlobalStorage()
@@ -150,6 +150,8 @@ func main() {
 			return
 		}
 		handleUserRename(os.Args[2])
+	case "forget":
+		handleForget()
 	case "vls", "tree":
 		handleVls()
 	case "update":
@@ -189,7 +191,8 @@ Commands:
   falcon checkout <target>      Switch branches or restore files
   falcon branch [name]          List or create branches
   falcon merge <branch>         Merge branches
-  falcon gc                     Garbage collect orphaned blobs
+  falcon forget                 Stop tracking files matched by .fignore
+  falcon gc                     Garbage collect orphaned blobs (clean cache)
   falcon version                Show Falcon CLI version
   falcon vls (or tree)          Show visual version tree & branches
   falcon user <name>            Change your username/identity

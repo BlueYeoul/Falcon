@@ -1113,3 +1113,28 @@ func handleRollback() {
 	manifest, _ := loadManifest(latestBackup)
 	restoreFiles(manifest, false)
 }
+
+func handleForget() {
+	defer acquireLock()()
+	index := loadIndex()
+	ignorePatterns, _ := loadIgnorePatterns()
+	count := 0
+
+	for path := range index {
+		info, err := os.Stat(path)
+		// If file doesn't exist anymore, or it matches ignore patterns, remove from index
+		if os.IsNotExist(err) || shouldIgnore(path, info, ignorePatterns) {
+			delete(index, path)
+			count++
+			fmt.Printf("  Untracked: %s\n", path)
+		}
+	}
+
+	if count > 0 {
+		saveIndex(index)
+		fmt.Printf("[Falcon] Stopped tracking %d files matching .fignore patterns.\n", count)
+		fmt.Println("Please run 'falcon commit' and 'falcon push' to sync this change.")
+	} else {
+		fmt.Println("No tracked files match current .fignore patterns.")
+	}
+}
