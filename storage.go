@@ -93,21 +93,66 @@ func copyFileAtomic(src, dst string) error {
 }
 
 func loadConfig() RepoConfig {
-	file, err := os.Open(LocalConfig)
 	var config RepoConfig
+
+	// 1. Load Global Config (Defaults)
+	gFile, err := os.Open(GlobalConfigPath)
 	if err == nil {
-		defer file.Close()
-		json.NewDecoder(file).Decode(&config)
+		json.NewDecoder(gFile).Decode(&config)
+		gFile.Close()
 	}
+
+	// 2. Load Local Config (Overrides)
+	lFile, err := os.Open(LocalConfig)
+	if err == nil {
+		var lConfig RepoConfig
+		json.NewDecoder(lFile).Decode(&lConfig)
+		lFile.Close()
+
+		// Merge
+		if lConfig.Name != "" {
+			config.Name = lConfig.Name
+		}
+		if lConfig.RemoteURL != "" {
+			config.RemoteURL = lConfig.RemoteURL
+		}
+		if lConfig.RemoteUser != "" {
+			config.RemoteUser = lConfig.RemoteUser
+		}
+		if lConfig.Author != "" {
+			config.Author = lConfig.Author
+		}
+		config.Sync = lConfig.Sync
+		config.CurrentBranch = lConfig.CurrentBranch
+		config.RemoteHash = lConfig.RemoteHash
+	}
+
 	if config.Name == "" {
 		wd, _ := os.Getwd()
 		config.Name = filepath.Base(wd)
 	}
+	if config.Author == "" {
+		config.Author = config.RemoteUser
+	}
+
 	return config
 }
 
 func saveConfig(config RepoConfig) {
-	atomicWriteJSON(LocalConfig, config)
+	// If inside a repo, save locally
+	if _, err := os.Stat(LocalRepoDir); err == nil {
+		atomicWriteJSON(LocalConfig, config)
+	}
+
+	// Always update global identity
+	os.MkdirAll(GlobalFalconDir, 0755)
+	globalConf := RepoConfig{
+		RemoteURL:  config.RemoteURL,
+		RemoteUser: config.RemoteUser,
+		Author:     config.Author,
+		RemoteHash: config.RemoteHash,
+	}
+	atomicWriteJSON(GlobalConfigPath, globalConf)
 }
 
 func loadManifest(idOrVersion string) (*VersionManifest, error) {

@@ -23,6 +23,10 @@ var (
 	LocalLockFile    = filepath.Join(LocalRepoDir, "lock")
 	IgnoreFile       = ".fignore"
 
+	// 🌐 Global Identity Configuration
+	GlobalFalconDir  = filepath.Join(HomeDir, ".falcon")
+	GlobalConfigPath = filepath.Join(GlobalFalconDir, "config.json")
+
 	// Server-side defaults
 	ServerBaseDir     = "/tmp/falcon_server" // Default for demo/local testing
 	ServerBlobsDir    = filepath.Join(ServerBaseDir, "blobs")
