@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const Version = "v0.0.1+11c"
+const Version = "v0.0.1+11d"
 
 func main() {
 	initGlobalStorage()
@@ -132,6 +132,12 @@ func main() {
 		handlePull(os.Args[2])
 	case "sls":
 		handleSLS()
+	case "rm":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: falcon rm <project_name>")
+			return
+		}
+		handleRm(os.Args[2])
 	case "trust":
 		if len(os.Args) == 2 {
 			handleTrustGen()
@@ -178,6 +184,7 @@ Commands:
   falcon push                   Securely upload .fco to server
   falcon pull <url>             Securely clone or update via certificate
   falcon sls                    List your projects on remote server
+  falcon rm <project>           Delete a project from remote server
   falcon keygen [server]        Generate device keys and register (Passport)
   falcon regis <user> -t <tok>  Register remote server credentials
 

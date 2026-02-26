@@ -76,6 +76,12 @@ func startServer(port string) {
 			}
 		} else if p == "/list" {
 			handleListProjects(w, r)
+		} else if p == "/remove" {
+			if !verifyRequestAuth(r) {
+				http.Error(w, "Unauthorized", 401)
+				return
+			}
+			handleRemoveProject(w, r)
 		} else if strings.HasPrefix(p, "/push/branch") {
 			if !verifyRequestAuth(r) {
 				http.Error(w, "Unauthorized", 401)
@@ -628,4 +634,41 @@ func handleFCOStorage(w http.ResponseWriter, r *http.Request) {
 	} else {
 		http.Error(w, "Method not allowed", 405)
 	}
+}
+
+func handleRemoveProject(w http.ResponseWriter, r *http.Request) {
+	deviceID := r.Header.Get("X-Falcon-Device-ID")
+	project := filepath.Base(r.URL.Query().Get("project"))
+	if project == "." || project == "" {
+		http.Error(w, "invalid project", 400)
+		return
+	}
+
+	// Resolve ownership
+	ownerFile := filepath.Join(ServerKeysDir, deviceID+".owner")
+	ownerBytes, err := os.ReadFile(ownerFile)
+	if err != nil {
+		http.Error(w, "user not identified", 403)
+		return
+	}
+	username := strings.TrimSpace(string(ownerBytes))
+
+	state.getLock("project:rm:" + username + ":" + project).Lock()
+	defer state.getLock("project:rm:" + username + ":" + project).Unlock()
+
+	// 1. Delete from incremental storage
+	incrementalPath := filepath.Join(ServerRefsDir, username, project)
+	err1 := os.RemoveAll(incrementalPath)
+
+	// 2. Delete from legacy storage (.fco file)
+	legacyPath := filepath.Join(ServerProjectsDir, username, project+".fco")
+	err2 := os.Remove(legacyPath)
+
+	if err1 != nil && err2 != nil && os.IsNotExist(err1) && os.IsNotExist(err2) {
+		http.Error(w, "project not found", 404)
+		return
+	}
+
+	fmt.Printf("[Server] 🗑️  Project deleted: %s/%s (by %s)\n", username, project, deviceID)
+	fmt.Fprintf(w, "Project '%s' deleted successfully", project)
 }

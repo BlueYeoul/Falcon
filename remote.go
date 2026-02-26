@@ -63,6 +63,37 @@ func handleSLS() {
 	fmt.Println()
 }
 
+func handleRm(projectName string) {
+	config := loadConfig()
+	url := config.RemoteURL
+	if url == "" {
+		url = "http://localhost:50005"
+	}
+	url = strings.TrimSuffix(url, "/")
+
+	fmt.Printf("[Falcon] Deleting project '%s' from %s...\n", projectName, url)
+
+	client := &http.Client{}
+	req, _ := http.NewRequest("POST", fmt.Sprintf("%s/remove?project=%s", url, projectName), nil)
+
+	// 🔑 Add Certificate Headers
+	addAuthHeaders(req)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("[Error] Network error deleting project: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 200 {
+		fmt.Printf("✅ %s\n", string(body))
+	} else {
+		fmt.Printf("❌ Failed to delete project (Status: %d): %s\n", resp.StatusCode, string(body))
+	}
+}
+
 func handlePls() {
 	entries, err := os.ReadDir(GlobalProjectsDir)
 	if err != nil {
