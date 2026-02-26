@@ -219,7 +219,7 @@ func handlePush() {
 	if currentHead != "" {
 		fmt.Printf("  ⬆️  Updating remote branch '%s' -> %s\n", config.CurrentBranch, currentHead[:12])
 		if err := pushBranch(url, config.RemoteUser, config.Name, config.CurrentBranch, currentHead); err != nil {
-			fmt.Printf("  ⚠️  Failed to update remote branch: %v\n", err)
+			fmt.Printf("  ⚠️  Notice: Remote branch pointer update skipped or failed. (%v)\n", err)
 		}
 	}
 
@@ -392,7 +392,7 @@ func syncRepoGranular(baseURL, user, project string) error {
 		return fmt.Errorf("network error: %v", err)
 	}
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("failed to fetch remote head. Status: %d", resp.StatusCode)
+		return fmt.Errorf("failed to fetch remote head. Status: %d\n  Detailed Error: %s %s returned %d", resp.StatusCode, req.Method, req.URL.String(), resp.StatusCode)
 	}
 	var res map[string]string
 	json.NewDecoder(resp.Body).Decode(&res)

@@ -52,7 +52,7 @@ func startServer(port string) {
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		p := filepath.Clean(r.URL.Path)
-		fmt.Printf("[Server] %s %s (p:%s) from %s\n", r.Method, r.URL.Path, p, r.RemoteAddr)
+		fmt.Printf("[Server] %s %s (Clean: %s) from %s\n", r.Method, r.URL.Path, p, r.RemoteAddr)
 
 		if strings.HasPrefix(p, "/auth/register") {
 			handleRegisterKey(w, r)
@@ -509,6 +509,7 @@ func handlePullHead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	refDir := filepath.Join(ServerRefsDir, username, project)
+	fmt.Printf("[Server] PullHead: Checking directory: %s\n", refDir)
 
 	// 1. Try to get head from explicit branch file
 	branchFile := filepath.Join(refDir, "branches", branch)

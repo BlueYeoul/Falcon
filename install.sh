@@ -12,7 +12,7 @@ else
     INSTALL_PATH="/usr/local/bin" # Fallback to sudo-required path
 fi
 
-VERSION="v0.0.1+9"
+VERSION="v0.0.1+10"
 DIST_DIR="./dist"
 
 set -e
