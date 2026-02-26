@@ -5,7 +5,7 @@
 
 set -e
 
-VERSION="v0.0.1-alpha+2"
+VERSION="v0.0.1+3"
 OUTPUT_DIR="dist"
 
 echo "📂 Creating $OUTPUT_DIR directory..."

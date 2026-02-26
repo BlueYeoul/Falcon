@@ -52,9 +52,9 @@ func startServer(port string) {
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("[Server] %s %s from %s\n", r.Method, r.URL.Path, r.RemoteAddr)
+
 		if strings.HasPrefix(r.URL.Path, "/auth/register") {
 			handleRegisterKey(w, r)
-			return
 		} else if r.URL.Path == "/auth/trust/gen" {
 			handleAuthTrustGen(w, r)
 		} else if r.URL.Path == "/auth/trust/use" {
@@ -90,7 +90,9 @@ func startServer(port string) {
 				http.Error(w, "Unauthorized", 401)
 				return
 			}
-			if strings.HasSuffix(r.URL.Path, "/manifest") {
+			if strings.HasSuffix(r.URL.Path, "/head") {
+				handlePullHead(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/manifest") {
 				handlePullManifest(w, r)
 			} else if strings.HasSuffix(r.URL.Path, "/blob") {
 				handlePullBlob(w, r)
@@ -400,14 +402,12 @@ func handleListProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePushManifest(w http.ResponseWriter, r *http.Request) {
+	username := filepath.Base(r.URL.Query().Get("user"))
 	projectName := filepath.Base(r.URL.Query().Get("project"))
-	if projectName == "" || projectName == "." || projectName == "/" {
-		http.Error(w, "invalid project", 400)
+	if username == "." || projectName == "." {
+		http.Error(w, "invalid params", 400)
 		return
 	}
-
-	state.getLock("proj:" + projectName).Lock()
-	defer state.getLock("proj:" + projectName).Unlock()
 
 	var m VersionManifest
 	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
@@ -416,10 +416,10 @@ func handlePushManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := m.CommitID
-	path := filepath.Join(ServerRefsDir, projectName, id+".json")
+	path := filepath.Join(ServerRefsDir, username, projectName, id+".json")
 	os.MkdirAll(filepath.Dir(path), 0755)
 	atomicWriteJSON(path, m)
-	fmt.Printf("[Server] Manifest saved: %s for %s\n", id, projectName)
+	fmt.Printf("[Server] Manifest saved: %s for %s/%s\n", id, username, projectName)
 }
 
 func handlePushBlob(w http.ResponseWriter, r *http.Request) {
@@ -442,18 +442,41 @@ func handlePushBlob(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("[Server] Blob backed up: %s\n", hash)
 }
 
-func handlePullManifest(w http.ResponseWriter, r *http.Request) {
+func handlePullHead(w http.ResponseWriter, r *http.Request) {
+	username := filepath.Base(r.URL.Query().Get("user"))
 	project := filepath.Base(r.URL.Query().Get("project"))
-	id := filepath.Base(r.URL.Query().Get("id"))
-	if project == "." || id == "." {
-		http.Error(w, "invalid params", 400)
+	refDir := filepath.Join(ServerRefsDir, username, project)
+
+	entries, err := os.ReadDir(refDir)
+	if err != nil || len(entries) == 0 {
+		http.Error(w, "no commits found", 404)
 		return
 	}
 
-	state.getLock("proj:" + project).Lock()
-	defer state.getLock("proj:" + project).Unlock()
+	// Simple heuristic: return latest by modtime
+	var latest os.FileInfo
+	var latestName string
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		info, _ := e.Info()
+		if latest == nil || info.ModTime().After(latest.ModTime()) {
+			latest = info
+			latestName = e.Name()
+		}
+	}
 
-	path := filepath.Join(ServerRefsDir, project, id+".json")
+	commitID := strings.TrimSuffix(latestName, ".json")
+	json.NewEncoder(w).Encode(map[string]string{"commit_id": commitID})
+}
+
+func handlePullManifest(w http.ResponseWriter, r *http.Request) {
+	username := filepath.Base(r.URL.Query().Get("user"))
+	project := filepath.Base(r.URL.Query().Get("project"))
+	id := filepath.Base(r.URL.Query().Get("id"))
+
+	path := filepath.Join(ServerRefsDir, username, project, id+".json")
 	http.ServeFile(w, r, path)
 }
 

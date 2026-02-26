@@ -143,147 +143,284 @@ func handlePush() {
 		return
 	}
 
-	fmt.Println("[Falcon] Packing repository into .fco archive...")
-	tmpFile := fmt.Sprintf("%s.fco", config.Name)
-	if err := packFCO(tmpFile); err != nil {
-		fmt.Printf("[Error] Failed to pack: %v\n", err)
-		return
-	}
-	defer os.Remove(tmpFile)
-
 	url := config.RemoteURL
 	if url == "" {
-		url = fmt.Sprintf("http://localhost:50005/%s/%s.fco", config.RemoteUser, config.Name)
-	} else if !strings.HasSuffix(url, ".fco") {
-		url = fmt.Sprintf("%s/%s/%s.fco", strings.TrimSuffix(url, "/"), config.RemoteUser, config.Name)
+		url = "http://localhost:50005"
+	}
+	url = strings.TrimSuffix(url, "/")
+
+	fmt.Printf("[Falcon] Pushing incremental updates to %s...\n", url)
+
+	// 1. Collect all manifests and blobs
+	refs, err := os.ReadDir(LocalRefsDir)
+	if err != nil {
+		fmt.Printf("[Error] Failed to read local refs: %v\n", err)
+		return
 	}
 
-	fmt.Printf("[Falcon] Pushing to %s...\n", url)
+	blobHashes := make(map[string]bool)
+	var manifests []VersionManifest
 
-	f, err := os.Open(tmpFile)
+	for _, r := range refs {
+		if !strings.HasSuffix(r.Name(), ".json") {
+			continue
+		}
+		refPath := filepath.Join(LocalRefsDir, r.Name())
+		data, _ := os.ReadFile(refPath)
+		var m VersionManifest
+		if err := json.Unmarshal(data, &m); err == nil {
+			manifests = append(manifests, m)
+			for _, fileMeta := range m.Files {
+				blobHashes[fileMeta.Hash] = true
+			}
+		}
+	}
+
+	// 2. Push Blobs (Granular)
+	totalBlobs := len(blobHashes)
+	currentBlob := 0
+	for hash := range blobHashes {
+		currentBlob++
+		fmt.Printf("\r  ⬆️  Pushing Blobs: %d/%d (%s...)", currentBlob, totalBlobs, hash[:8])
+		if err := pushBlob(url, hash); err != nil {
+			fmt.Printf("\n[Error] Failed to push blob %s: %v\n", hash, err)
+			return
+		}
+	}
+	fmt.Println("\n  ✅ All blobs synchronized.")
+
+	// 3. Push Manifests
+	for _, m := range manifests {
+		fmt.Printf("  ⬆️  Pushing Manifest: %s (%s)\n", m.CommitID, m.Description)
+		if err := pushManifest(url, config.RemoteUser, config.Name, m); err != nil {
+			fmt.Printf("[Error] Failed to push manifest %s: %v\n", m.CommitID, err)
+			return
+		}
+	}
+
+	fmt.Println("[Success] Repository pushed successfully!")
+}
+
+func pushBlob(baseURL, hash string) error {
+	path := filepath.Join(GlobalBlobsDir, hash)
+	f, err := os.Open(path)
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
 
-	req, _ := http.NewRequest("PUT", url, f)
+	url := fmt.Sprintf("%s/push/blob?hash=%s", baseURL, hash)
+	req, _ := http.NewRequest("POST", url, f)
 	req.Header.Set("Content-Type", "application/octet-stream")
+	addAuthHeaders(req)
 
-	// 🔑 Add Certificate Headers
-	pub, priv, err := EnsureKeys()
-	if err == nil {
-		deviceID, _ := os.Hostname()
-		ts := fmt.Sprintf("%d", time.Now().Unix())
-		sig := SignMessage(priv, deviceID+ts)
-
-		req.Header.Set("X-Falcon-Device-ID", deviceID)
-		req.Header.Set("X-Falcon-Timestamp", ts)
-		req.Header.Set("X-Falcon-Signature", sig)
-		fmt.Printf("  Using Device ID: %s %x...\n", deviceID, pub[:4])
-	}
-
-	client := &http.Client{Timeout: 30 * time.Minute}
+	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("[Error] Network error: %v\n", err)
-		return
+		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Println("[Success] Repository pushed successfully!")
-	} else {
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("[Error] Server rejected push. Status: %d, Message: %s\n", resp.StatusCode, string(body))
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("status %d", resp.StatusCode)
 	}
+	return nil
+}
+
+func pushManifest(baseURL, user, project string, m VersionManifest) error {
+	data, _ := json.Marshal(m)
+	url := fmt.Sprintf("%s/push/manifest?user=%s&project=%s", baseURL, user, project)
+	req, _ := http.NewRequest("POST", url, strings.NewReader(string(data)))
+	req.Header.Set("Content-Type", "application/json")
+	addAuthHeaders(req)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func addAuthHeaders(req *http.Request) {
+	_, priv, err := EnsureKeys()
+	if err != nil {
+		return
+	}
+	deviceID, _ := os.Hostname()
+	ts := fmt.Sprintf("%d", time.Now().Unix())
+	sig := SignMessage(priv, deviceID+ts)
+
+	req.Header.Set("X-Falcon-Device-ID", deviceID)
+	req.Header.Set("X-Falcon-Timestamp", ts)
+	req.Header.Set("X-Falcon-Signature", sig)
 }
 
 func handlePull(target string) {
+	config := loadConfig()
+
+	var baseURL, user, project string
+
 	if strings.HasPrefix(target, "http") {
-		handleCloneRemote(target)
-		return
+		// Detect user/project from URL if possible, or target URL is baseURL
+		baseURL = target
+		// Simple parsing: http://domain/user/project
+		parts := strings.Split(strings.TrimPrefix(strings.TrimPrefix(target, "http://"), "https://"), "/")
+		if len(parts) >= 2 {
+			user, project = parts[len(parts)-2], parts[len(parts)-1]
+		}
+	} else {
+		parts := strings.Split(target, "/")
+		if len(parts) != 2 {
+			fmt.Println("Usage: falcon pull <username>/<repo_name> OR <http_url>")
+			return
+		}
+		user, project = parts[0], parts[1]
+		baseURL = config.RemoteURL
+		if baseURL == "" {
+			baseURL = "http://fco.blue-yeoul.com"
+		}
 	}
 
-	parts := strings.Split(target, "/")
-	if len(parts) != 2 {
-		fmt.Println("Usage: falcon pull <username>/<repo_name> OR <http_url>")
-		return
+	baseURL = strings.TrimSuffix(baseURL, "/")
+	// If we are already in a repo, update it. If not, clone it.
+	if _, err := os.Stat(LocalRepoDir); err == nil {
+		fmt.Printf("[Falcon] Pulling updates for %s/%s...\n", user, project)
+		syncRepoGranular(baseURL, user, project)
+	} else {
+		handleCloneRemoteGranular(baseURL, user, project)
 	}
-	username, repoName := parts[0], parts[1]
-
-	// ... legacy logic ...
-	handleCloneRemote(fmt.Sprintf("https://falcon.blue-yeoul.com/%s/falcon/%s.fco", username, repoName))
 }
 
-func handleCloneRemote(url string) {
-	// Extract project name from URL
-	parts := strings.Split(url, "/")
-	projectName := "cloned_repo"
-	if len(parts) > 0 {
-		projectName = strings.TrimSuffix(parts[len(parts)-1], ".fco")
-	}
+func handleCloneRemoteGranular(baseURL, user, project string) {
+	fmt.Printf("[Falcon] Cloning %s/%s from %s...\n", user, project, baseURL)
 
-	fmt.Printf("[Falcon] Cloning %s...\n", url)
+	os.MkdirAll(project, 0755)
+	os.Chdir(project)
+	initLocalStorage()
 
-	// Create request with Auth Headers
-	client := &http.Client{}
+	// Update local config
+	config := loadConfig()
+	config.RemoteURL = baseURL
+	config.RemoteUser = user
+	config.Name = project
+	saveConfig(config)
+
+	syncRepoGranular(baseURL, user, project)
+	fmt.Println("[Success] Repository cloned successfully.")
+}
+
+func syncRepoGranular(baseURL, user, project string) {
+	// 1. Get HEAD
+	url := fmt.Sprintf("%s/pull/head?user=%s&project=%s", baseURL, user, project)
 	req, _ := http.NewRequest("GET", url, nil)
+	addAuthHeaders(req)
 
-	// 🔑 Add Certificate Headers
-	pub, priv, err := EnsureKeys()
-	if err == nil {
-		deviceID, _ := os.Hostname()
-		ts := fmt.Sprintf("%d", time.Now().Unix())
-		sig := SignMessage(priv, deviceID+ts)
-
-		req.Header.Set("X-Falcon-Device-ID", deviceID)
-		req.Header.Set("X-Falcon-Timestamp", ts)
-		req.Header.Set("X-Falcon-Signature", sig)
-		fmt.Printf("  Using Device ID: %s %x...\n", deviceID, pub[:4])
-	}
-
+	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != 200 {
-		code := 0
-		if resp != nil {
-			code = resp.StatusCode
-		}
-		fmt.Printf("[Error] Failed to clone. Status: %d\n", code)
-		if code == 401 {
-			fmt.Println("  (Hint: Register your device key with 'falcon keygen [server_url]' first)")
-		}
+		fmt.Printf("[Error] Failed to fetch remote head. Status: %d\n", resp.StatusCode)
 		return
+	}
+	var res map[string]string
+	json.NewDecoder(resp.Body).Decode(&res)
+	resp.Body.Close()
+
+	headID := res["commit_id"]
+	fmt.Printf("  📍 Remote HEAD: %s\n", headID)
+
+	// 2. Fetch Manifests recursively
+	fetchQueue := []string{headID}
+	fetchedCount := 0
+
+	for len(fetchQueue) > 0 {
+		id := fetchQueue[0]
+		fetchQueue = fetchQueue[1:]
+
+		manifestPath := filepath.Join(LocalRefsDir, id+".json")
+		if _, err := os.Stat(manifestPath); err == nil {
+			continue // Already have it
+		}
+
+		fmt.Printf("\r  📥 Fetching Manifests: %d...", fetchedCount+1)
+		m, err := fetchManifest(baseURL, user, project, id)
+		if err != nil {
+			fmt.Printf("\n[Error] Failed to fetch manifest %s: %v\n", id, err)
+			return
+		}
+		fetchedCount++
+
+		// Add parents to queue
+		fetchQueue = append(fetchQueue, m.Parents...)
+	}
+	fmt.Println("\n  ✅ All manifests synchronized.")
+
+	// 3. Sync Blobs for the HEAD version
+	headManifest, _ := loadManifest(headID)
+	totalBlobs := len(headManifest.Files)
+	for i, f := range headManifest.Files {
+		fmt.Printf("\r  📥 Fetching Blobs: %d/%d (%s...)", i+1, totalBlobs, f.Hash[:8])
+		dst := filepath.Join(GlobalBlobsDir, f.Hash)
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		if err := fetchBlob(baseURL, f.Hash); err != nil {
+			fmt.Printf("\n[Error] Failed to fetch blob %s: %v\n", f.Hash, err)
+		}
+	}
+	fmt.Println("\n  ✅ Working set blobs synchronized.")
+
+	// 4. Auto-checkout
+	handleCheckout(headID)
+}
+
+func fetchManifest(baseURL, user, project, id string) (*VersionManifest, error) {
+	url := fmt.Sprintf("%s/pull/manifest?user=%s&project=%s&id=%s", baseURL, user, project, id)
+	req, _ := http.NewRequest("GET", url, nil)
+	addAuthHeaders(req)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		return nil, fmt.Errorf("failed to fetch")
 	}
 	defer resp.Body.Close()
 
-	os.MkdirAll(projectName, 0755)
-	os.Chdir(projectName)
+	var m VersionManifest
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		return nil, err
+	}
 
-	tmpFile := projectName + ".fco"
-	f, _ := os.Create(tmpFile)
+	// Save locally
+	path := filepath.Join(LocalRefsDir, id+".json")
+	os.MkdirAll(filepath.Dir(path), 0755)
+	atomicWriteJSON(path, m)
+	return &m, nil
+}
+
+func fetchBlob(baseURL, hash string) error {
+	url := fmt.Sprintf("%s/pull/blob?hash=%s", baseURL, hash)
+	req, _ := http.NewRequest("GET", url, nil)
+	addAuthHeaders(req)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		return fmt.Errorf("failed to fetch")
+	}
+	defer resp.Body.Close()
+
+	dst := filepath.Join(GlobalBlobsDir, hash)
+	os.MkdirAll(filepath.Dir(dst), 0755)
+	f, _ := os.Create(dst)
+	defer f.Close()
 	io.Copy(f, resp.Body)
-	f.Close()
-	defer os.Remove(tmpFile)
-
-	fmt.Println("[Falcon] Unpacking repository...")
-	if err := unpackFCO(tmpFile); err != nil {
-		fmt.Printf("[Error] Unpack failed: %v\n", err)
-		return
-	}
-
-	// Init local head if missing
-	initLocalStorage()
-
-	// Try to checkout latest
-	versions := getAllVersions(LocalRefsDir)
-	if len(versions) > 0 {
-		latestVer := versions[len(versions)-1].CommitID
-		if latestVer == "" {
-			latestVer = versions[len(versions)-1].Version
-		}
-		handleCheckout(latestVer)
-	}
-	fmt.Println("[Success] Repository cloned successfully.")
+	return nil
 }
 
 func packFCO(fcoPath string) error {
